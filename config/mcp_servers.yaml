@@ -1,13 +1,13 @@
 mcp_servers:
   - name: "amass-mcp-primary"
     url: "http://localhost:8001"
-    type: "amass"
+    server_type: "amass"
     enabled: true
     description: "Primary Amass MCP server for subdomain enumeration"
   
   - name: "amass-mcp-secondary"
     url: "http://localhost:8002"
-    type: "amass"
+    server_type: "amass"
     enabled: false
     description: "Secondary Amass MCP server for load balancing"
 

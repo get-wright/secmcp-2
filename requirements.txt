@@ -1,5 +1,6 @@
 # CrewAI and LangChain dependencies
 crewai
+crewai-tools[mcp]
 langchain
 langchain-community
 langchain-openai
