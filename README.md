@@ -54,10 +54,12 @@ cd reconnaissance-agent
 pip install -r requirements.txt
 ```
 
-3. Create logs directory:
+3. Run setup and test script:
 ```bash
-mkdir logs
+python setup_and_test.py
 ```
+
+This will check your system requirements, create necessary directories, and run basic tests.
 
 ## Usage
 
@@ -88,14 +90,14 @@ python main.py example.com --output report.txt
 Before running reconnaissance, test your MCP server setup:
 
 ```bash
+# Quick connectivity check
+python test_mcp_connection.py --quick
+
 # Run full test suite
 python test_mcp_connection.py
 
 # Interactive testing
 python test_mcp_connection.py --interactive
-
-# Quick connectivity check
-# Option 3 in interactive mode
 ```
 
 ### Programmatic Usage
@@ -116,22 +118,10 @@ asyncio.run(main())
 
 ```python
 from src.reconnaissance_agent import ReconnaissanceAgent
-from src.mcp_adapter import MCPManager, create_amass_config
 
 async def advanced_reconnaissance():
-    # Setup custom MCP manager
-    mcp_manager = MCPManager()
-    
-    # Register custom Amass configuration
-    amass_config = create_amass_config(
-        name="amass-mcp",
-        working_directory="./mcp",
-        config_file="/path/to/amass/config.yaml"
-    )
-    mcp_manager.register_server(amass_config)
-    
-    # Create agent with custom manager
-    agent = ReconnaissanceAgent(mcp_manager)
+    # Create agent with custom working directory
+    agent = ReconnaissanceAgent("./mcp")
     
     # Start MCP servers
     await agent.start_mcp_servers()
@@ -171,22 +161,20 @@ print(status)
 
 ### Amass Configuration
 
-You can provide custom Amass configuration files:
+You can customize Amass behavior by:
 
-```python
-amass_config = create_amass_config(
-    name="amass-mcp",
-    config_file="/path/to/amass_config.yaml"
-)
+1. **Using the provided config template:**
+```bash
+cp config/amass_config_example.yaml config/amass_config.yaml
+# Edit the file to add your API keys and preferences
 ```
 
-### Environment Variables
-
-Set environment variables for MCP server configuration:
-
+2. **Setting environment variables:**
 ```bash
 export AMASS_CONFIG=/path/to/config.yaml
 ```
+
+The MCP server will automatically use the configuration file if available.
 
 ## Extending with Additional MCP Servers
 

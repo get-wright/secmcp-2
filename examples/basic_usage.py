@@ -9,9 +9,9 @@ import asyncio
 import json
 from src.reconnaissance_agent import (
     ReconnaissanceAgent, 
-    run_reconnaissance
+    run_reconnaissance,
+    AmassServerManager
 )
-from src.mcp_adapter import MCPManager, create_amass_config
 
 
 async def example_1_simple_passive_recon():
@@ -65,19 +65,8 @@ async def example_3_custom_agent_setup():
     print("Example 3: Custom Agent Setup")
     print("=" * 60)
     
-    # Create MCP manager
-    mcp_manager = MCPManager()
-    
-    # Configure Amass MCP server
-    amass_config = create_amass_config(
-        name="amass-mcp",
-        working_directory="./mcp",
-        config_file="./config/amass_config_example.yaml"  # Optional custom config
-    )
-    mcp_manager.register_server(amass_config)
-    
-    # Create reconnaissance agent
-    agent = ReconnaissanceAgent(mcp_manager)
+    # Create reconnaissance agent with custom working directory
+    agent = ReconnaissanceAgent("./mcp")
     
     try:
         # Start MCP servers
@@ -115,59 +104,38 @@ async def example_3_custom_agent_setup():
     print("\n")
 
 
-async def example_4_direct_tool_usage():
+async def example_4_direct_server_management():
     """
-    Example 4: Direct tool usage
-    This shows how to use individual tools directly.
+    Example 4: Direct server management
+    This shows how to manage the MCP server directly.
     """
     print("=" * 60)
-    print("Example 4: Direct Tool Usage")
+    print("Example 4: Direct Server Management")
     print("=" * 60)
     
-    # Setup MCP manager
-    mcp_manager = MCPManager()
-    amass_config = create_amass_config(working_directory="./mcp")
-    mcp_manager.register_server(amass_config)
+    # Create server manager
+    server_manager = AmassServerManager("./mcp")
     
     try:
         # Start MCP server
-        await mcp_manager.connect_server("amass-mcp")
+        print("Starting Amass MCP server...")
+        success = await server_manager.start_server()
         
-        # Direct tool calls
-        print("Calling passive subdomain enumeration...")
-        response = await mcp_manager.call_tool(
-            "amass-mcp",
-            "passive_subdomain_enum",
-            {
-                "domain": "example.com",
-                "timeout": 60
-            }
-        )
-        
-        if response.success:
-            print("Passive enumeration results:")
-            print(json.dumps(response.data, indent=2))
+        if success:
+            print("✓ Server started successfully")
+            print(f"Server running: {server_manager.is_running}")
+            
+            # Give it some time to initialize
+            await asyncio.sleep(2)
+            
+            print("Server is ready for reconnaissance tasks")
         else:
-            print(f"Error: {response.error}")
-        
-        print("\nCalling subdomain intelligence...")
-        intel_response = await mcp_manager.call_tool(
-            "amass-mcp",
-            "subdomain_intel",
-            {
-                "domain": "example.com",
-                "output_format": "json"
-            }
-        )
-        
-        if intel_response.success:
-            print("Intelligence results:")
-            print(json.dumps(intel_response.data, indent=2))
-        else:
-            print(f"Error: {intel_response.error}")
+            print("✗ Failed to start server")
     
     finally:
-        await mcp_manager.disconnect_server("amass-mcp")
+        print("Stopping server...")
+        await server_manager.stop_server()
+        print("Server stopped")
     
     print("\n")
 
@@ -291,7 +259,7 @@ async def main():
         await example_1_simple_passive_recon()
         await example_2_comprehensive_recon()
         await example_3_custom_agent_setup()
-        await example_4_direct_tool_usage()
+        await example_4_direct_server_management()
         await example_5_multiple_domains()
         await example_6_error_handling()
         

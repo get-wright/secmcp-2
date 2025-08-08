@@ -97,7 +97,8 @@ at https://github.com/cyproxio/mcp-for-security/tree/main/amass-mcp
         result = await run_reconnaissance(
             domain=args.domain,
             comprehensive=args.comprehensive,
-            auto_manage_servers=not args.no_auto_manage
+            auto_manage_servers=not args.no_auto_manage,
+            working_directory="./mcp"
         )
         
         # Output results

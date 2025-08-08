@@ -7,185 +7,85 @@ using the Amass MCP server and other security tools.
 
 import asyncio
 import json
+import subprocess
+import sys
 from typing import Any, Dict, List, Optional, Union
 
 from crewai import Agent, Task, Crew
-from crewai.tools import BaseTool
-from pydantic import BaseModel, Field
+from crewai_tools import MCPTool
 from loguru import logger
 
-from .mcp_adapter import MCPManager, create_amass_config, MCPResponse
 
-
-class SubdomainEnumInput(BaseModel):
-    """Input schema for subdomain enumeration tools."""
-    domain: str = Field(..., description="Target domain for subdomain enumeration")
-    config: Optional[str] = Field(None, description="Path to Amass configuration file")
-    timeout: Optional[int] = Field(300, description="Timeout in seconds")
-
-
-class ActiveSubdomainEnumInput(SubdomainEnumInput):
-    """Input schema for active subdomain enumeration."""
-    brute_force: Optional[bool] = Field(False, description="Enable brute force enumeration")
-    wordlist: Optional[str] = Field(None, description="Path to custom wordlist")
-
-
-class SubdomainIntelInput(BaseModel):
-    """Input schema for subdomain intelligence gathering."""
-    domain: str = Field(..., description="Target domain for intelligence gathering")
-    output_format: Optional[str] = Field("json", description="Output format (json, txt, csv)")
-
-
-class PassiveSubdomainEnumTool(BaseTool):
-    """Tool for passive subdomain enumeration using Amass MCP."""
+class AmassServerManager:
+    """Manager for the Amass MCP server process."""
     
-    name: str = "passive_subdomain_enumeration"
-    description: str = "Perform passive subdomain enumeration using Amass without direct interaction with target"
-    args_schema: type[BaseModel] = SubdomainEnumInput
+    def __init__(self, working_directory: str = "./mcp"):
+        self.working_directory = working_directory
+        self.process: Optional[subprocess.Popen] = None
+        self.is_running = False
     
-    def __init__(self, mcp_manager: MCPManager):
-        super().__init__()
-        self.mcp_manager = mcp_manager
-    
-    def _run(self, domain: str, config: Optional[str] = None, timeout: Optional[int] = 300) -> str:
-        """Execute passive subdomain enumeration."""
-        return asyncio.run(self._async_run(domain, config, timeout))
-    
-    async def _async_run(self, domain: str, config: Optional[str] = None, timeout: Optional[int] = 300) -> str:
-        """Async implementation of passive subdomain enumeration."""
+    async def start_server(self) -> bool:
+        """Start the Amass MCP server."""
+        if self.is_running:
+            logger.info("Amass MCP server is already running")
+            return True
+        
         try:
-            logger.info(f"Starting passive subdomain enumeration for {domain}")
+            logger.info("Starting Amass MCP server...")
             
-            arguments = {
-                "domain": domain,
-                "timeout": timeout or 300
-            }
-            
-            if config:
-                arguments["config"] = config
-            
-            response = await self.mcp_manager.call_tool(
-                "amass-mcp", 
-                "passive_subdomain_enum", 
-                arguments
+            # Start the MCP server process
+            self.process = subprocess.Popen(
+                [sys.executable, "-m", "mcp.amass_mcp_server"],
+                cwd=self.working_directory,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
             
-            if response.success:
-                logger.info(f"Passive enumeration completed for {domain}")
-                return json.dumps(response.data, indent=2) if response.data else "No results found"
+            # Give the server time to start up
+            await asyncio.sleep(2)
+            
+            if self.process.poll() is None:
+                self.is_running = True
+                logger.info("Amass MCP server started successfully")
+                return True
             else:
-                logger.error(f"Passive enumeration failed: {response.error}")
-                return f"Error: {response.error}"
+                stderr_output = self.process.stderr.read() if self.process.stderr else "Unknown error"
+                logger.error(f"Amass MCP server failed to start: {stderr_output}")
+                return False
                 
         except Exception as e:
-            logger.error(f"Exception in passive enumeration: {str(e)}")
-            return f"Exception occurred: {str(e)}"
-
-
-class ActiveSubdomainEnumTool(BaseTool):
-    """Tool for active subdomain enumeration using Amass MCP."""
+            logger.error(f"Failed to start Amass MCP server: {str(e)}")
+            return False
     
-    name: str = "active_subdomain_enumeration"
-    description: str = "Perform active subdomain enumeration using Amass with DNS probing and brute force"
-    args_schema: type[BaseModel] = ActiveSubdomainEnumInput
-    
-    def __init__(self, mcp_manager: MCPManager):
-        super().__init__()
-        self.mcp_manager = mcp_manager
-    
-    def _run(
-        self, 
-        domain: str, 
-        config: Optional[str] = None, 
-        timeout: Optional[int] = 600,
-        brute_force: Optional[bool] = False,
-        wordlist: Optional[str] = None
-    ) -> str:
-        """Execute active subdomain enumeration."""
-        return asyncio.run(self._async_run(domain, config, timeout, brute_force, wordlist))
-    
-    async def _async_run(
-        self, 
-        domain: str, 
-        config: Optional[str] = None, 
-        timeout: Optional[int] = 600,
-        brute_force: Optional[bool] = False,
-        wordlist: Optional[str] = None
-    ) -> str:
-        """Async implementation of active subdomain enumeration."""
+    async def stop_server(self) -> bool:
+        """Stop the Amass MCP server."""
+        if not self.is_running or not self.process:
+            return True
+        
         try:
-            logger.info(f"Starting active subdomain enumeration for {domain}")
+            self.process.terminate()
             
-            arguments = {
-                "domain": domain,
-                "timeout": timeout or 600,
-                "brute_force": brute_force or False
-            }
+            # Wait for graceful shutdown
+            try:
+                await asyncio.wait_for(self._wait_for_process(), timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("MCP server didn't terminate gracefully, killing...")
+                self.process.kill()
             
-            if config:
-                arguments["config"] = config
-            if wordlist:
-                arguments["wordlist"] = wordlist
+            self.is_running = False
+            logger.info("Amass MCP server stopped")
+            return True
             
-            response = await self.mcp_manager.call_tool(
-                "amass-mcp", 
-                "active_subdomain_enum", 
-                arguments
-            )
-            
-            if response.success:
-                logger.info(f"Active enumeration completed for {domain}")
-                return json.dumps(response.data, indent=2) if response.data else "No results found"
-            else:
-                logger.error(f"Active enumeration failed: {response.error}")
-                return f"Error: {response.error}"
-                
         except Exception as e:
-            logger.error(f"Exception in active enumeration: {str(e)}")
-            return f"Exception occurred: {str(e)}"
-
-
-class SubdomainIntelligenceTool(BaseTool):
-    """Tool for gathering intelligence on discovered subdomains."""
+            logger.error(f"Error stopping Amass MCP server: {str(e)}")
+            return False
     
-    name: str = "subdomain_intelligence"
-    description: str = "Gather intelligence and additional information about discovered subdomains"
-    args_schema: type[BaseModel] = SubdomainIntelInput
-    
-    def __init__(self, mcp_manager: MCPManager):
-        super().__init__()
-        self.mcp_manager = mcp_manager
-    
-    def _run(self, domain: str, output_format: Optional[str] = "json") -> str:
-        """Execute subdomain intelligence gathering."""
-        return asyncio.run(self._async_run(domain, output_format))
-    
-    async def _async_run(self, domain: str, output_format: Optional[str] = "json") -> str:
-        """Async implementation of subdomain intelligence gathering."""
-        try:
-            logger.info(f"Gathering subdomain intelligence for {domain}")
-            
-            arguments = {
-                "domain": domain,
-                "output_format": output_format or "json"
-            }
-            
-            response = await self.mcp_manager.call_tool(
-                "amass-mcp", 
-                "subdomain_intel", 
-                arguments
-            )
-            
-            if response.success:
-                logger.info(f"Intelligence gathering completed for {domain}")
-                return json.dumps(response.data, indent=2) if response.data else "No intelligence found"
-            else:
-                logger.error(f"Intelligence gathering failed: {response.error}")
-                return f"Error: {response.error}"
-                
-        except Exception as e:
-            logger.error(f"Exception in intelligence gathering: {str(e)}")
-            return f"Exception occurred: {str(e)}"
+    async def _wait_for_process(self):
+        """Wait for the process to terminate."""
+        while self.process and self.process.poll() is None:
+            await asyncio.sleep(0.1)
 
 
 class ReconnaissanceAgent:
@@ -196,29 +96,43 @@ class ReconnaissanceAgent:
     passive and active subdomain reconnaissance using Amass and other tools.
     """
     
-    def __init__(self, mcp_manager: Optional[MCPManager] = None):
+    def __init__(self, working_directory: str = "./mcp"):
         """Initialize the Reconnaissance Agent."""
-        self.mcp_manager = mcp_manager or MCPManager()
-        self._setup_mcp_servers()
+        self.server_manager = AmassServerManager(working_directory)
         self._setup_tools()
         self._setup_agent()
     
-    def _setup_mcp_servers(self):
-        """Setup MCP servers for the agent."""
-        # Register Amass MCP server
-        amass_config = create_amass_config(
-            name="amass-mcp",
-            working_directory="./mcp"
-        )
-        self.mcp_manager.register_server(amass_config)
-    
     def _setup_tools(self):
-        """Setup tools for the agent."""
-        self.tools = [
-            PassiveSubdomainEnumTool(self.mcp_manager),
-            ActiveSubdomainEnumTool(self.mcp_manager),
-            SubdomainIntelligenceTool(self.mcp_manager)
-        ]
+        """Setup tools for the agent using CrewAI MCP tools."""
+        try:
+            # Create MCP tools using the official CrewAI MCP integration
+            self.passive_enum_tool = MCPTool(
+                name="passive_subdomain_enum",
+                description="Perform passive subdomain enumeration using Amass without direct interaction with target",
+                server_name="amass-mcp"
+            )
+            
+            self.active_enum_tool = MCPTool(
+                name="active_subdomain_enum", 
+                description="Perform active subdomain enumeration using Amass with DNS probing and brute force",
+                server_name="amass-mcp"
+            )
+            
+            self.intel_tool = MCPTool(
+                name="subdomain_intel",
+                description="Gather intelligence and additional information about discovered subdomains",
+                server_name="amass-mcp"
+            )
+            
+            self.tools = [
+                self.passive_enum_tool,
+                self.active_enum_tool,
+                self.intel_tool
+            ]
+            
+        except Exception as e:
+            logger.warning(f"Could not setup MCP tools (server may not be running): {e}")
+            self.tools = []
     
     def _setup_agent(self):
         """Setup the CrewAI agent."""
@@ -237,26 +151,31 @@ class ReconnaissanceAgent:
     async def start_mcp_servers(self) -> Dict[str, bool]:
         """Start all MCP servers."""
         logger.info("Starting MCP servers...")
-        results = await self.mcp_manager.connect_all()
+        success = await self.server_manager.start_server()
         
-        for server_name, success in results.items():
-            if success:
-                logger.info(f"✓ {server_name} started successfully")
-            else:
-                logger.error(f"✗ Failed to start {server_name}")
+        results = {"amass-mcp": success}
+        
+        if success:
+            logger.info("✓ amass-mcp started successfully")
+            # Refresh tools now that server is running
+            self._setup_tools()
+            self._setup_agent()
+        else:
+            logger.error("✗ Failed to start amass-mcp")
         
         return results
     
     async def stop_mcp_servers(self) -> Dict[str, bool]:
         """Stop all MCP servers."""
         logger.info("Stopping MCP servers...")
-        results = await self.mcp_manager.disconnect_all()
+        success = await self.server_manager.stop_server()
         
-        for server_name, success in results.items():
-            if success:
-                logger.info(f"✓ {server_name} stopped successfully")
-            else:
-                logger.error(f"✗ Failed to stop {server_name}")
+        results = {"amass-mcp": success}
+        
+        if success:
+            logger.info("✓ amass-mcp stopped successfully")
+        else:
+            logger.error("✗ Failed to stop amass-mcp")
         
         return results
     
@@ -318,15 +237,17 @@ class ReconnaissanceAgent:
     
     async def get_server_status(self) -> Dict[str, str]:
         """Get status of all MCP servers."""
-        statuses = self.mcp_manager.get_all_statuses()
-        return {name: status.value for name, status in statuses.items()}
+        return {
+            "amass-mcp": "running" if self.server_manager.is_running else "stopped"
+        }
 
 
 # Convenience function to create and run reconnaissance
 async def run_reconnaissance(
     domain: str, 
     comprehensive: bool = True,
-    auto_manage_servers: bool = True
+    auto_manage_servers: bool = True,
+    working_directory: str = "./mcp"
 ) -> str:
     """
     Convenience function to run reconnaissance on a domain.
@@ -335,12 +256,13 @@ async def run_reconnaissance(
         domain: Target domain for reconnaissance
         comprehensive: Whether to perform comprehensive (active + passive) or passive-only recon
         auto_manage_servers: Whether to automatically start/stop MCP servers
+        working_directory: Directory containing MCP server implementations
     
     Returns:
         Reconnaissance report as string
     """
     
-    agent = ReconnaissanceAgent()
+    agent = ReconnaissanceAgent(working_directory)
     
     try:
         if auto_manage_servers:
