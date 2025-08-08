@@ -11,77 +11,105 @@ from datetime import datetime
 
 from crewai import Agent, Task, Crew
 from crewai.tools import tool
-from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from .mcp_client import MCPClient
 
 logger = logging.getLogger(__name__)
 
-class SubdomainEnumerationInput(BaseModel):
-    """Input model for subdomain enumeration"""
-    domain: str = Field(description="Target domain for subdomain enumeration")
-    method: str = Field(default="combined", description="Enumeration method: passive, active, or combined")
-    servers: Optional[List[str]] = Field(default=None, description="List of MCP server names to use")
-    passive_config: Optional[Dict] = Field(default=None, description="Configuration for passive enumeration")
-    active_config: Optional[Dict] = Field(default=None, description="Configuration for active enumeration")
+# Global MCP client instance - will be set when creating the agent
+_mcp_client = None
 
-class SubdomainEnumerationTool(BaseTool):
-    """CrewAI tool for subdomain enumeration using MCP servers"""
+def set_mcp_client(client: MCPClient):
+    """Set the global MCP client instance"""
+    global _mcp_client
+    _mcp_client = client
+
+@tool("subdomain_enumeration")
+def enumerate_subdomains(domain: str, method: str = "combined", 
+                        servers: str = "", passive_sources: str = "", 
+                        active_brute: bool = False, timeout: int = 30) -> str:
+    """
+    Perform subdomain enumeration using Amass MCP servers.
     
-    name: str = "subdomain_enumeration"
-    description: str = "Perform subdomain enumeration using Amass MCP servers. Supports passive, active, and combined enumeration methods."
-    args_schema = SubdomainEnumerationInput
+    Args:
+        domain: Target domain for subdomain enumeration
+        method: Enumeration method - 'passive', 'active', or 'combined' (default)
+        servers: Comma-separated list of MCP server names to use (optional)
+        passive_sources: Comma-separated list of passive sources (optional)
+        active_brute: Enable brute force for active enumeration (default: False)
+        timeout: Timeout in minutes (default: 30)
     
-    def __init__(self, mcp_client: MCPClient):
-        super().__init__()
-        self.mcp_client = mcp_client
+    Returns:
+        Formatted enumeration results with discovered subdomains
+    """
+    global _mcp_client
     
-    def _run(self, domain: str, method: str = "combined", servers: Optional[List[str]] = None,
-            passive_config: Optional[Dict] = None, active_config: Optional[Dict] = None) -> str:
-        """Execute subdomain enumeration"""
+    if _mcp_client is None:
+        return "Error: MCP client not initialized. Please contact support."
+    
+    try:
+        # Parse server list
+        server_list = None
+        if servers.strip():
+            server_list = [s.strip() for s in servers.split(",") if s.strip()]
+        
+        # Configure passive enumeration
+        passive_config = {}
+        if passive_sources.strip():
+            passive_config["sources"] = [s.strip() for s in passive_sources.split(",") if s.strip()]
+        if timeout:
+            passive_config["timeout"] = timeout
+        
+        # Configure active enumeration
+        active_config = {}
+        if active_brute:
+            active_config["brute"] = True
+        if timeout:
+            active_config["timeout"] = timeout
+        
+        # Run the async enumeration
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         try:
-            # Run the async enumeration
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
             if method == "passive":
                 result = loop.run_until_complete(
-                    self.mcp_client.enumerate_subdomains_passive(domain, servers)
+                    _mcp_client.enumerate_subdomains_passive(domain, server_list)
                 )
             elif method == "active":
                 result = loop.run_until_complete(
-                    self.mcp_client.enumerate_subdomains_active(domain, servers, active_config)
+                    _mcp_client.enumerate_subdomains_active(domain, server_list, active_config)
                 )
             elif method == "combined":
                 result = loop.run_until_complete(
-                    self.mcp_client.enumerate_subdomains_combined(domain, servers, passive_config, active_config)
+                    _mcp_client.enumerate_subdomains_combined(domain, server_list, passive_config, active_config)
                 )
             else:
                 return f"Invalid method: {method}. Use 'passive', 'active', or 'combined'."
-            
+        finally:
             loop.close()
-            
-            # Format the results for the agent
-            return self._format_results(result)
-            
-        except Exception as e:
-            logger.error(f"Error in subdomain enumeration: {e}")
-            return f"Error performing subdomain enumeration: {str(e)}"
+        
+        # Format the results for the agent
+        return _format_enumeration_results(result)
+        
+    except Exception as e:
+        logger.error(f"Error in subdomain enumeration: {e}")
+        return f"Error performing subdomain enumeration: {str(e)}"
+
+def _format_enumeration_results(result: Dict[str, Any]) -> str:
+    """Format enumeration results for the agent"""
+    if not result.get("success", False):
+        return f"Subdomain enumeration failed for domain {result.get('domain', 'unknown')}"
     
-    def _format_results(self, result: Dict[str, Any]) -> str:
-        """Format enumeration results for the agent"""
-        if not result.get("success", False):
-            return f"Subdomain enumeration failed for domain {result.get('domain', 'unknown')}"
-        
-        domain = result.get("domain", "unknown")
-        method = result.get("method", "unknown")
-        subdomains = result.get("subdomains", [])
-        total_count = result.get("total_count", 0)
-        successful_servers = result.get("successful_servers", [])
-        failed_servers = result.get("failed_servers", [])
-        
-        output = f"""Subdomain Enumeration Results for {domain}:
+    domain = result.get("domain", "unknown")
+    method = result.get("method", "unknown")
+    subdomains = result.get("subdomains", [])
+    total_count = result.get("total_count", 0)
+    successful_servers = result.get("successful_servers", [])
+    failed_servers = result.get("failed_servers", [])
+    
+    output = f"""Subdomain Enumeration Results for {domain}:
 Method: {method}
 Total subdomains found: {total_count}
 Successful servers: {', '.join(successful_servers) if successful_servers else 'None'}
@@ -89,21 +117,38 @@ Failed servers: {', '.join(failed_servers) if failed_servers else 'None'}
 
 Discovered Subdomains:
 """
+    
+    if subdomains:
+        for i, subdomain in enumerate(sorted(subdomains), 1):
+            output += f"{i:3d}. {subdomain}\n"
+    else:
+        output += "No subdomains discovered.\n"
+    
+    # Add analysis if we have subdomains
+    if subdomains:
+        interesting_subdomains = [sub for sub in subdomains 
+                                if any(keyword in sub.lower() for keyword in 
+                                     ['admin', 'dev', 'test', 'staging', 'internal', 'api', 'mail'])]
         
-        if subdomains:
-            for i, subdomain in enumerate(sorted(subdomains), 1):
-                output += f"{i:3d}. {subdomain}\\n"
-        else:
-            output += "No subdomains discovered.\\n"
+        if interesting_subdomains:
+            output += f"\nPotentially Interesting Subdomains ({len(interesting_subdomains)}):\n"
+            for i, subdomain in enumerate(interesting_subdomains, 1):
+                output += f"  {i}. {subdomain}\n"
         
-        return output
+        output += "\nRecommendations:\n"
+        output += "1. Perform web application assessment on discovered subdomains\n"
+        output += "2. Check for common vulnerabilities on admin interfaces\n"
+        output += "3. Investigate development/staging environments for information disclosure\n"
+    
+    return output
 
 class SubdomainEnumerationAgent:
     """CrewAI Agent for subdomain enumeration using MCP servers"""
     
     def __init__(self, config_path: str = "config/mcp_servers.yaml"):
         self.mcp_client = MCPClient(config_path)
-        self.tool = SubdomainEnumerationTool(self.mcp_client)
+        # Set the global MCP client for the tool
+        set_mcp_client(self.mcp_client)
         self.agent = None
         self.crew = None
         self._setup_agent()
@@ -118,7 +163,7 @@ class SubdomainEnumerationAgent:
             all possible subdomains associated with a target domain. You understand the importance 
             of both passive and active enumeration methods and can adapt your approach based on 
             the target and requirements.""",
-            tools=[self.tool],
+            tools=[enumerate_subdomains],
             verbose=True,
             memory=True,
             allow_delegation=False
@@ -130,38 +175,57 @@ class SubdomainEnumerationAgent:
                               active_config: Optional[Dict] = None) -> Task:
         """Create a subdomain enumeration task"""
         
-        task_description = f"""Perform {method} subdomain enumeration for the domain: {domain}
-        
-        Your task is to:
-        1. Use the subdomain_enumeration tool to discover subdomains for {domain}
-        2. Use the {method} enumeration method
-        3. Analyze the results and provide insights about the discovered subdomains
-        4. Identify any interesting or potentially vulnerable subdomains
-        5. Provide recommendations for further investigation
-        
-        Method: {method}
-        Target Domain: {domain}
-        """
+        # Build tool parameters
+        tool_params = {
+            "domain": domain,
+            "method": method
+        }
         
         if servers:
-            task_description += f"\\nMCP Servers to use: {', '.join(servers)}"
+            tool_params["servers"] = ",".join(servers)
         
-        if passive_config:
-            task_description += f"\\nPassive Configuration: {json.dumps(passive_config, indent=2)}"
+        if passive_config and passive_config.get("sources"):
+            tool_params["passive_sources"] = ",".join(passive_config["sources"])
         
         if active_config:
-            task_description += f"\\nActive Configuration: {json.dumps(active_config, indent=2)}"
+            if active_config.get("brute"):
+                tool_params["active_brute"] = True
+            if active_config.get("timeout"):
+                tool_params["timeout"] = active_config["timeout"]
+        elif passive_config and passive_config.get("timeout"):
+            tool_params["timeout"] = passive_config["timeout"]
+        
+        task_description = f"""Perform {method} subdomain enumeration for the domain: {domain}
+        
+        Use the subdomain_enumeration tool with these parameters:
+        - domain: {domain}
+        - method: {method}
+        """
+        
+        if tool_params.get("servers"):
+            task_description += f"\n- servers: {tool_params['servers']}"
+        if tool_params.get("passive_sources"):
+            task_description += f"\n- passive_sources: {tool_params['passive_sources']}"
+        if tool_params.get("active_brute"):
+            task_description += f"\n- active_brute: {tool_params['active_brute']}"
+        if tool_params.get("timeout"):
+            task_description += f"\n- timeout: {tool_params['timeout']}"
+        
+        task_description += """
+        
+        After getting the results, provide analysis and insights about:
+        1. Total number of subdomains discovered
+        2. Patterns in subdomain naming conventions
+        3. Potentially interesting subdomains for security assessment
+        4. Recommendations for further investigation
+        """
         
         return Task(
             description=task_description,
             agent=self.agent,
-            expected_output="""A comprehensive report containing:
-            1. Total number of subdomains discovered
-            2. Complete list of discovered subdomains
-            3. Analysis of subdomain patterns and naming conventions
-            4. Identification of potentially interesting subdomains (admin, staging, dev, etc.)
-            5. Recommendations for further security assessment
-            6. Any errors or issues encountered during enumeration"""
+            expected_output="""A comprehensive report containing the complete enumeration results, 
+            analysis of discovered subdomains, identification of interesting targets, and 
+            recommendations for further security assessment."""
         )
     
     async def start_mcp_servers(self) -> Dict[str, bool]:
@@ -209,27 +273,12 @@ class SubdomainEnumerationAgent:
         return [name for name, server in self.mcp_client.servers.items() if server.enabled]
 
 # Convenience function for quick enumeration
-@tool
+@tool("quick_subdomain_enum")
 def quick_subdomain_enum(domain: str, method: str = "passive") -> str:
-    """Quick subdomain enumeration tool for immediate use"""
+    """Quick subdomain enumeration tool for immediate use without full agent setup"""
     try:
-        agent = SubdomainEnumerationAgent()
-        
-        # Start servers
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        server_status = loop.run_until_complete(agent.start_mcp_servers())
-        logger.info(f"MCP Server status: {server_status}")
-        
-        # Execute enumeration
-        result = agent.execute_enumeration(domain, method)
-        
-        # Stop servers
-        loop.run_until_complete(agent.stop_mcp_servers())
-        loop.close()
-        
-        return result
+        # Use the global enumerate_subdomains tool directly
+        return enumerate_subdomains(domain=domain, method=method)
         
     except Exception as e:
         logger.error(f"Error in quick enumeration: {e}")
