@@ -1,0 +1,95 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+subdomain_enumeration.log
+
+# Results and output files
+results/
+output/
+*.txt
+*.json
+*.csv
+
+# Configuration overrides
+config/local_*.yaml
+config/production_*.yaml
+
+# Temporary files
+temp/
+tmp/
+.tmp/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Amass specific
+amass_output/
+.amass/
+
+# MCP server files
+mcp/servers/
+mcp/data/
+mcp/*.pid
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/_build/
+
+# Security
+*.pem
+*.key
+*.crt
+api_keys.txt
+secrets.yaml

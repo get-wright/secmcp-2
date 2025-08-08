@@ -1,0 +1,18 @@
+mcp_servers:
+  - name: "amass-mcp-primary"
+    url: "http://localhost:8001"
+    type: "amass"
+    enabled: true
+    description: "Primary Amass MCP server for subdomain enumeration"
+  
+  - name: "amass-mcp-secondary"
+    url: "http://localhost:8002"
+    type: "amass"
+    enabled: false
+    description: "Secondary Amass MCP server for load balancing"
+
+# Default configuration for MCP servers
+default_config:
+  timeout: 30
+  max_retries: 3
+  retry_delay: 1
