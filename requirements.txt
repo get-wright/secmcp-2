@@ -1,0 +1,33 @@
+# CrewAI and LangChain dependencies
+crewai
+langchain
+langchain-community
+langchain-openai
+
+# MCP Protocol dependencies
+mcp
+httpx
+websockets
+
+# Core dependencies
+pydantic
+pyyaml
+asyncio-mqtt
+requests
+aiohttp
+
+# Logging and utilities
+colorlog
+rich
+click
+
+# Optional dependencies for enhanced functionality
+python-dotenv
+jsonschema
+
+# Development dependencies (optional)
+pytest
+pytest-asyncio
+black
+flake8
+mypy

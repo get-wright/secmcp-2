@@ -47,7 +47,6 @@ subdomain_enumeration.log
 # Results and output files
 results/
 output/
-*.txt
 *.json
 *.csv
 
