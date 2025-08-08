@@ -1,0 +1,9 @@
+servers:
+  - name: amass-mcp
+    # Adjust these to your local setup following the upstream docs
+    command: node
+    args:
+      - path/to/amass-mcp/server.js
+    env: {}
+
+
