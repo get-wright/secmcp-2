@@ -16,12 +16,34 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
 
 # Virtual environments
 .env
@@ -39,26 +61,6 @@ venv.bak/
 *.swo
 *~
 
-# Logs
-*.log
-logs/
-subdomain_enumeration.log
-
-# Results and output files
-results/
-output/
-*.json
-*.csv
-
-# Configuration overrides
-config/local_*.yaml
-config/production_*.yaml
-
-# Temporary files
-temp/
-tmp/
-.tmp/
-
 # OS
 .DS_Store
 .DS_Store?
@@ -68,27 +70,28 @@ tmp/
 ehthumbs.db
 Thumbs.db
 
-# Amass specific
+# Logs
+logs/
+*.log
+
+# Output files
+*.txt
+*.json
+!requirements.txt
+!package.json
+!**/config/**/*.yaml
+!**/config/**/*.yml
+
+# Temporary files
+*.tmp
+*.temp
+
+# MCP test results
+mcp_test_results.json
+
+# Reports
+*_report.txt
+*_report.json
+
+# Amass output
 amass_output/
-.amass/
-
-# MCP server files
-mcp/servers/
-mcp/data/
-mcp/*.pid
-
-# Test files
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Documentation
-docs/_build/
-
-# Security
-*.pem
-*.key
-*.crt
-api_keys.txt
-secrets.yaml
