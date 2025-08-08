@@ -3,7 +3,8 @@ from __future__ import annotations
 import anyio
 from typing import Any, Dict, List, Optional, Tuple
 
-from mcp.client.stdio import StdioServerParameters, connect
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.client.session import ClientSession
 
 from src.tools.base_mcp import MCPServerConfig, MCPToolError
@@ -19,14 +20,14 @@ class StdIoMCPClient:
     def __init__(self, server_config: MCPServerConfig):
         self.server_config = server_config
 
-    async def _asession(self) -> Tuple[ClientSession, anyio.abc.AsyncResource]:
+    async def _asession(self) -> Tuple[ClientSession, Any]:
         params = StdioServerParameters(
             command=self.server_config.command,
             args=self.server_config.args,
             env=self.server_config.env or {},
         )
 
-        transport_cm = connect(params)
+        transport_cm = stdio_client(params)
         read = write = None
         transport = await transport_cm.__aenter__()
         if isinstance(transport, tuple) and len(transport) == 2:
@@ -34,10 +35,12 @@ class StdIoMCPClient:
         else:
             # Fallback if SDK changes; fail clearly
             await transport_cm.__aexit__(None, None, None)
-            raise MCPToolError("Unexpected transport returned by MCP connect().")
+            raise MCPToolError("Unexpected transport returned by MCP stdio_client().")
 
         session = ClientSession(read, write)
         await session.__aenter__()
+        # Ensure handshake/initialization is performed before use
+        await session.initialize()
         return session, transport_cm
 
     async def list_tools(self) -> List[Dict[str, Any]]:
